@@ -62,7 +62,8 @@ public abstract class PeerConnectionChannel
     protected DataChannel localDataChannel;
     protected List<VideoCodec> videoCodecs;
     protected List<AudioCodec> audioCodecs;
-    protected Integer videoMaxBitrate = null, audioMaxBitrate = null;
+    protected Integer videoMaxBitrate = null, videoMinBitrate = null;//plus added videoMinBitrate
+	protected Integer audioMaxBitrate = null;
     protected ArrayList<String> queuedMessage;
     private MediaConstraints sdpConstraints;
     private SessionDescription localSdp;
@@ -409,6 +410,23 @@ public abstract class PeerConnectionChannel
             Log.e(LOG_TAG, "Failed to configure max video bitrate");
         }
     }
+	
+	private void setMinBitrate(RtpSender sender, Integer bitrate) {//plus added
+        if (sender == null) {
+            return;
+        }
+        RtpParameters rtpParameters = sender.getParameters();
+        if (rtpParameters == null) {
+            Log.e(LOG_TAG, "Null rtp paramters");
+            return;
+        }
+        for (RtpParameters.Encoding encoding : rtpParameters.encodings) {
+            encoding.minBitrateBps = bitrate == null ? null : bitrate * 1000;
+        }
+        if (!sender.setParameters(rtpParameters)) {
+            Log.e(LOG_TAG, "Failed to configure max video bitrate");
+        }
+    }
 
     protected void setMaxBitrate(String mediaStreamId) {
         DCHECK(peerConnection);
@@ -416,6 +434,10 @@ public abstract class PeerConnectionChannel
         if (videoRtpSenders.get(mediaStreamId) != null) {
             setMaxBitrate(videoRtpSenders.get(mediaStreamId), videoMaxBitrate);
         }
+		if (videoRtpSenders.get(mediaStreamId) != null) {//plus added
+            setMinBitrate(videoRtpSenders.get(mediaStreamId), videoMinBitrate);
+        }
+		
         if (audioRtpSenders.get(mediaStreamId) != null) {
             setMaxBitrate(audioRtpSenders.get(mediaStreamId), audioMaxBitrate);
         }

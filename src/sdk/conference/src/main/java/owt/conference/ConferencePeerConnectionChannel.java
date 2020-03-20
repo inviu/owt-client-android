@@ -49,6 +49,7 @@ final class ConferencePeerConnectionChannel extends PeerConnectionChannel {
                 videoCodecs.add(param.codec.name);
             }
             videoMaxBitrate = VideoEncodingParameters.maxBitrate;
+			videoMinBitrate = VideoEncodingParameters.minBitrate;//plus added
         }
         if (options != null && options.audioEncodingParameters != null
                 && options.audioEncodingParameters.size() != 0) {

@@ -15,6 +15,7 @@ public final class VideoEncodingParameters {
      * *NOTE* currently setting different bitrates for different video codecs is not supported.
      */
     public static int maxBitrate = 0;
+	public static int minBitrate = 0;
     /**
      * Video codec.
      */
@@ -35,5 +36,14 @@ public final class VideoEncodingParameters {
         RCHECK(maxBitrateKbps > 0);
         this.codec = videoCodecParameters;
         maxBitrate = maxBitrateKbps;
+    }
+	
+	//plus added
+	public VideoEncodingParameters(VideoCodecParameters videoCodecParameters, int maxBitrateKbps, int minBitrateKbps) {
+        RCHECK(videoCodecParameters);
+        RCHECK(maxBitrateKbps > 0);
+        this.codec = videoCodecParameters;
+        maxBitrate = maxBitrateKbps;
+		minBitrate = minBitrateKbps;
     }
 }
