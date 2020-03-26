@@ -126,6 +126,14 @@
                     android:layout_weight="1.8"
                     android:text="1280 * 720"/>
 
+                <RadioButton
+                    android:id="@+id/p1080"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:layout_weight="1.8"
+                    android:text="1920 * 1080"/>
+
             </RadioGroup>
 
         </LinearLayout>

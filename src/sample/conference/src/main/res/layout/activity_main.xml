@@ -53,27 +53,54 @@
                 android:textColor="@android:color/background_light"
                 android:textSize="15sp"/>
 
-            <Button
-                android:id="@+id/multi_func_btn_subscribe"
+            <CheckBox
+                android:id="@+id/multi_func_btn_subscribe1"
                 style="?metaButtonBarButtonStyle"
+                android:visibility="gone"
                 android:layout_width="0dp"
                 android:layout_height="38dp"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="subscribe"
+                android:text="1"
                 android:textColor="@android:color/background_light"
                 android:textSize="15sp"/>
 
-            <Button
-                android:id="@+id/multi_func_btn_unsubscribe"
+            <CheckBox
+                android:id="@+id/multi_func_btn_subscribe2"
                 style="?metaButtonBarButtonStyle"
+                android:visibility="gone"
                 android:layout_width="0dp"
                 android:layout_height="38dp"
                 android:layout_weight="1"
                 android:gravity="center"
-                android:text="unSubscribe"
+                android:text="2"
                 android:textColor="@android:color/background_light"
                 android:textSize="15sp"/>
+
+            <CheckBox
+                android:id="@+id/multi_func_btn_subscribe3"
+                style="?metaButtonBarButtonStyle"
+                android:visibility="gone"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="3"
+                android:textColor="@android:color/background_light"
+                android:textSize="15sp"/>
+
+            <CheckBox
+                android:id="@+id/multi_func_btn_subscribe4"
+                style="?metaButtonBarButtonStyle"
+                android:visibility="gone"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="4"
+                android:textColor="@android:color/background_light"
+                android:textSize="15sp"/>
+
 
         </LinearLayout>
 </FrameLayout>

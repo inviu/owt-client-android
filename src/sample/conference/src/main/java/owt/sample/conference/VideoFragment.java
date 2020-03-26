@@ -7,9 +7,7 @@ package owt.sample.conference;
 import android.content.Context;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
-import android.util.Log;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -20,49 +18,53 @@ import org.webrtc.RendererCommon;
 import org.webrtc.SurfaceViewRenderer;
 
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 
 public class VideoFragment extends Fragment {
-
+    public static int kMaxStream=8;
     private VideoFragmentListener listener;
-    private SurfaceViewRenderer fullRenderer, smallRenderer;
-    private TextView statsInView, statsOutView;
+    private SurfaceViewRenderer smallRenderer;
+    private SurfaceViewRenderer fullRenderer1,fullRenderer2,fullRenderer3,fullRenderer4;
+    private TextView[] statsInViews=new TextView[kMaxStream];;
+    private TextView statsOutView;
     private float dX, dY;
     private BigInteger lastBytesSent = BigInteger.valueOf(0);
-    private BigInteger lastBytesReceived = BigInteger.valueOf(0);
-    private Long lastFrameDecoded = Long.valueOf(0);
+    private BigInteger[] lastBytesReceiveds = new BigInteger[kMaxStream];
+    private Long[] lastFrameDecodeds = new Long[kMaxStream];
     private Long lastFrameEncoded = Long.valueOf(0);
-    private View.OnTouchListener touchListener = new View.OnTouchListener() {
-        @Override
-        public boolean onTouch(View v, MotionEvent event) {
-            if (v.getId() == R.id.small_renderer) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        dX = v.getX() - event.getRawX();
-                        dY = v.getY() - event.getRawY();
-                        break;
-                    case MotionEvent.ACTION_MOVE:
-                        v.animate()
-                                .x(event.getRawX() + dX)
-                                .y(event.getRawY() + dY)
-                                .setDuration(0)
-                                .start();
-                        break;
-                    case MotionEvent.ACTION_UP:
-                        v.animate()
-                                .x(event.getRawX() + dX >= event.getRawY() + dY ? event.getRawX()
-                                        + dX : 0)
-                                .y(event.getRawX() + dX >= event.getRawY() + dY ? 0
-                                        : event.getRawY() + dY)
-                                .setDuration(10)
-                                .start();
-                        break;
-                }
-            }
-            return true;
-        }
-    };
+//    private View.OnTouchListener touchListener = new View.OnTouchListener() {
+//        @Override
+//        public boolean onTouch(View v, MotionEvent event) {
+//            if (v.getId() == R.id.small_renderer) {
+//                switch (event.getAction()) {
+//                    case MotionEvent.ACTION_DOWN:
+//                        dX = v.getX() - event.getRawX();
+//                        dY = v.getY() - event.getRawY();
+//                        break;
+//                    case MotionEvent.ACTION_MOVE:
+//                        v.animate()
+//                                .x(event.getRawX() + dX)
+//                                .y(event.getRawY() + dY)
+//                                .setDuration(0)
+//                                .start();
+//                        break;
+//                    case MotionEvent.ACTION_UP:
+//                        v.animate()
+//                                .x(event.getRawX() + dX >= event.getRawY() + dY ? event.getRawX()
+//                                        + dX : 0)
+//                                .y(event.getRawX() + dX >= event.getRawY() + dY ? 0
+//                                        : event.getRawY() + dY)
+//                                .setDuration(10)
+//                                .start();
+//                        break;
+//                }
+//            }
+//            return true;
+//        }
+//    };
 
     public VideoFragment() {
     }
@@ -74,28 +76,53 @@ public class VideoFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
             Bundle savedInstanceState) {
-        View mView = inflater.inflate(R.layout.fragment_video, container, false);
+        int resID=kMaxStream==8? R.layout.fragment_video9: R.layout.fragment_video;
+        View mView = inflater.inflate(resID, container, false);
 
-        statsInView = mView.findViewById(R.id.stats_in);
-        statsInView.setVisibility(View.GONE);
+//        statsInView = mView.findViewById(R.id.stats_in);
+//        statsInView.setVisibility(View.GONE);
+        Context ctx=getActivity().getBaseContext();
+        for(int i=0;i<kMaxStream;++i){
+            int resId = getResources().getIdentifier("stats_in"+(i+1), "id", ctx.getPackageName());
+            statsInViews[i] = mView.findViewById(resId);
+            statsInViews[i].setVisibility(View.GONE);
+        }
+
         statsOutView = mView.findViewById(R.id.stats_out);
         statsOutView.setVisibility(View.GONE);
 
-        fullRenderer = mView.findViewById(R.id.full_renderer);
+
+//        fullRenderer = mView.findViewById(R.id.full_renderer);
+        List<SurfaceViewRenderer> renderers=new ArrayList<>();
+        for(int i=0;i<kMaxStream;++i){
+            int resId = getResources().getIdentifier("full_renderer"+(i+1), "id", ctx.getPackageName());
+            renderers.add(mView.findViewById(resId));
+        }
+
+        for (SurfaceViewRenderer render :
+                renderers) {
+            render.init(((MainActivity) getActivity()).rootEglBase.getEglBaseContext(), null);
+            render.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT);
+            render.setEnableHardwareScaler(true);
+            render.setZOrderMediaOverlay(true);
+        }
+
+        //更改预览窗口
         smallRenderer = mView.findViewById(R.id.small_renderer);
 
         smallRenderer.init(((MainActivity) getActivity()).rootEglBase.getEglBaseContext(), null);
         smallRenderer.setMirror(true);
-        smallRenderer.setOnTouchListener(touchListener);
+//        smallRenderer.setOnTouchListener(touchListener);
         smallRenderer.setEnableHardwareScaler(true);
         smallRenderer.setZOrderMediaOverlay(true);
 
-        fullRenderer.init(((MainActivity) getActivity()).rootEglBase.getEglBaseContext(), null);
-        fullRenderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT);
-        fullRenderer.setEnableHardwareScaler(true);
-        fullRenderer.setZOrderMediaOverlay(true);
+//        fullRenderer.init(((MainActivity) getActivity()).rootEglBase.getEglBaseContext(), null);
+//        fullRenderer.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT);
+//        fullRenderer.setEnableHardwareScaler(true);
+//        fullRenderer.setZOrderMediaOverlay(true);
 
-        listener.onRenderer(smallRenderer, fullRenderer);
+        listener.onRenderer(smallRenderer, renderers);
+
         clearStats(true);
         clearStats(false);
         return mView;
@@ -112,13 +139,16 @@ public class VideoFragment extends Fragment {
     }
 
     void clearStats(boolean outbound) {
-        final TextView statsView = outbound ? statsOutView : statsInView;
+//        final TextView statsView = outbound ? statsOutView : statsInView;
         if (outbound) {
             lastBytesSent = BigInteger.valueOf(0);
             lastFrameEncoded = Long.valueOf(0);
         } else {
-            lastBytesReceived = BigInteger.valueOf(0);
-            lastFrameDecoded = Long.valueOf(0);
+            for(int i=0;i<kMaxStream;++i){
+                lastBytesReceiveds[i] = BigInteger.valueOf(0);
+                lastFrameDecodeds[i] = Long.valueOf(0);
+            }
+
         }
         final String statsReport = (outbound ? "\n--- OUTBOUND ---" : "\n--- INBOUND ---")
                 + "\nCodec: "
@@ -128,19 +158,28 @@ public class VideoFragment extends Fragment {
         getActivity().runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                statsView.setVisibility(View.VISIBLE);
-                statsView.setText(statsReport);
+                if(outbound){
+                    statsOutView.setVisibility(View.VISIBLE);
+                    statsOutView.setText(statsReport);
+                }
+                else{
+                    for(TextView textView:statsInViews){
+                        textView.setVisibility(View.VISIBLE);
+                        textView.setText(statsReport);
+                    }
+                }
             }
         });
     }
 
-    void updateStats(RTCStatsReport report, boolean outbound) {
-        final TextView statsView = outbound ? statsOutView : statsInView;
+    void updateStats(RTCStatsReport report, int index) {
+        boolean outbound=index<0;
         String codecId = null;
         String codec = "";
         long bytesSR = 0;
         long width = 0, height = 0;
         long frameRate = 0;
+        int lost=0;
         for (RTCStats stats : report.getStatsMap().values()) {
             if (stats.getType().equals(outbound ? "outbound-rtp" : "inbound-rtp")) {
                 Map<String, Object> members = stats.getMembers();
@@ -152,18 +191,20 @@ public class VideoFragment extends Fragment {
                         lastBytesSent = bytes;
                     } else {
                         BigInteger bytes = (BigInteger) members.get("bytesReceived");
-                        bytesSR = bytes.longValue() - lastBytesReceived.longValue();
-                        lastBytesReceived = bytes;
+                        bytesSR = bytes.longValue() - lastBytesReceiveds[index].longValue();
+                        lastBytesReceiveds[index] = bytes;
+                        Integer packetsLost=(Integer) members.get("packetsLost");
+                        lost=packetsLost.intValue();
                     }
 
                     long currentFrame = (long) members.get(outbound ? "framesEncoded" : "framesDecoded");
-                    long lastFrame = outbound ? lastFrameEncoded : lastFrameDecoded ;
+                    long lastFrame = outbound ? lastFrameEncoded : lastFrameDecodeds[index] ;
                     frameRate = (currentFrame - lastFrame) * 1000
                             / MainActivity.STATS_INTERVAL_MS;
                     if (outbound) {
                         lastFrameEncoded = currentFrame;
                     } else {
-                        lastFrameDecoded = currentFrame;
+                        lastFrameDecodeds[index] = currentFrame;
                     }
                 }
             }
@@ -181,18 +222,25 @@ public class VideoFragment extends Fragment {
             codec = (String) report.getStatsMap().get(codecId).getMembers().get("mimeType");
         }
 
-        final String statsReport = (outbound ? "\n--- OUTBOUND ---" : "\n--- INBOUND ---")
+        final String statsReport = (outbound ? "\n--- OUTBOUND ---" : "\n--- INBOUND ---"+ index)
                 + "\nCodec: " + codec
                 + "\nResolution: " + width + "x" + height
                 + "\nBitrate: " + bytesSR * 8 / MainActivity.STATS_INTERVAL_MS + "kbps"
-                + "\nFrameRate: " + frameRate;
+                + "\nFrameRate: " + frameRate
+                + (outbound ? "" : "\nLost:"+ lost);
         getActivity().runOnUiThread(() -> {
-            statsView.setVisibility(View.VISIBLE);
-            statsView.setText(statsReport);
+            if(index>=0){
+                statsInViews[index].setVisibility(View.VISIBLE);
+                statsInViews[index].setText(statsReport);
+            }
+            else{
+                statsOutView.setVisibility(View.VISIBLE);
+                statsOutView.setText(statsReport);
+            }
         });
     }
 
     public interface VideoFragmentListener {
-        void onRenderer(SurfaceViewRenderer localRenderer, SurfaceViewRenderer remoteRenderer);
+        void onRenderer(SurfaceViewRenderer localRenderer, List<SurfaceViewRenderer> remoteRenderers);
     }
 }

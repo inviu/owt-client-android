@@ -4,17 +4,6 @@
  */
 package owt.sample.conference;
 
-import static android.content.pm.PackageManager.PERMISSION_GRANTED;
-
-import static org.webrtc.PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
-
-import static owt.base.MediaCodecs.AudioCodec.OPUS;
-import static owt.base.MediaCodecs.AudioCodec.PCMU;
-import static owt.base.MediaCodecs.VideoCodec.H264;
-import static owt.base.MediaCodecs.VideoCodec.H265;
-import static owt.base.MediaCodecs.VideoCodec.VP8;
-import static owt.base.MediaCodecs.VideoCodec.VP9;
-
 import android.Manifest;
 import android.annotation.TargetApi;
 import android.content.Context;
@@ -35,12 +24,14 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
 import android.widget.Toast;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.webrtc.EglBase;
+import org.webrtc.Logging;
 import org.webrtc.PeerConnection;
 import org.webrtc.RTCStatsReport;
 import org.webrtc.SurfaceViewRenderer;
@@ -56,6 +47,7 @@ import java.util.concurrent.Executors;
 
 import owt.base.ActionCallback;
 import owt.base.AudioCodecParameters;
+import owt.base.AudioEncodingParameters;
 import owt.base.ContextInitialization;
 import owt.base.LocalStream;
 import owt.base.MediaConstraints;
@@ -78,11 +70,20 @@ import owt.conference.SubscriptionCapabilities;
 import owt.sample.utils.OwtScreenCapturer;
 import owt.sample.utils.OwtVideoCapturer;
 
+import static android.content.pm.PackageManager.PERMISSION_GRANTED;
+import static org.webrtc.PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
+import static owt.base.MediaCodecs.AudioCodec.OPUS;
+import static owt.base.MediaCodecs.AudioCodec.PCMU;
+import static owt.base.MediaCodecs.VideoCodec.H264;
+import static owt.base.MediaCodecs.VideoCodec.H265;
+import static owt.base.MediaCodecs.VideoCodec.VP8;
+import static owt.base.MediaCodecs.VideoCodec.VP9;
+
 public class MainActivity extends AppCompatActivity
         implements VideoFragment.VideoFragmentListener,
         ActivityCompat.OnRequestPermissionsResultCallback,
         ConferenceClient.ConferenceClientObserver {
-
+    public static final int kMaxFullRenderer= VideoFragment.kMaxStream;
     static final int STATS_INTERVAL_MS = 5000;
     private static final String TAG = "OWT_CONF";
     private static final int OWT_REQUEST_CODE = 100;
@@ -97,19 +98,19 @@ public class MainActivity extends AppCompatActivity
     private SettingsFragment settingsFragment;
     private View fragmentContainer;
     private View bottomView;
-    private Button leftBtn, rightBtn, middleBtn, subscribeBtn, unSubscribeBtn;
+    private Button leftBtn, rightBtn, middleBtn;
     private ConferenceClient conferenceClient;
     private ConferenceInfo conferenceInfo;
     private Publication publication;
-    private Subscription subscription;
     private LocalStream localStream;
-    private RemoteStream stream2Sub;
     private OwtVideoCapturer capturer;
     private LocalStream screenStream;
     private OwtScreenCapturer screenCapturer;
     private Publication screenPublication;
-    private SurfaceViewRenderer localRenderer, remoteRenderer;
-    private RemoteStream remoteForwardStream = null;
+    private SurfaceViewRenderer localRenderer;
+    private List<SurfaceViewRenderer> remoteRenderers;
+    private Subscription[] subscriptions=new Subscription[kMaxFullRenderer];
+    private RemoteStream[] remoteForwardStreams=new RemoteStream[kMaxFullRenderer];
     private int subscribeRemoteStreamChoice = 0;
     private int subscribeVideoCodecChoice = 0;
     private int subscribeSimulcastRidChoice = 0;
@@ -157,22 +158,73 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
-    private View.OnClickListener subscribe = new View.OnClickListener() {
-        @Override
-        public void onClick(View v) {
-            subscribeRemoteStreamChoice = 0;
-            subscribeVideoCodecChoice = 0;
-            subscribeSimulcastRidChoice = 0;
-            final String[] items = (String[]) remoteStreamIdList.toArray(new String[0]);
-            AlertDialog.Builder singleChoiceDialog =
-                    new AlertDialog.Builder(MainActivity.this);
-            singleChoiceDialog.setTitle("Remote Stream List");
-            singleChoiceDialog.setSingleChoiceItems(items, 0,
-                    (dialog, which) -> subscribeRemoteStreamChoice = which);
-            singleChoiceDialog.setPositiveButton("ok",
-                    (dialog, which) -> chooseCodec(
-                            remoteStreamMap.get(items[subscribeRemoteStreamChoice])));
-            singleChoiceDialog.show();
+//    private View.OnClickListener subscribe = new View.OnClickListener() {
+//        @Override
+//        public void onClick(View v) {
+//            subscribeRemoteStreamChoice = 0;
+//            subscribeVideoCodecChoice = 0;
+//            subscribeSimulcastRidChoice = 0;
+//            final String[] items = (String[]) remoteStreamIdList.toArray(new String[0]);
+//            AlertDialog.Builder singleChoiceDialog =
+//                    new AlertDialog.Builder(MainActivity.this);
+//            singleChoiceDialog.setTitle("Remote Stream List");
+//            singleChoiceDialog.setSingleChoiceItems(items, 0,
+//                    (dialog, which) -> subscribeRemoteStreamChoice = which);
+//            singleChoiceDialog.setPositiveButton("ok",
+//                    (dialog, which) -> chooseCodec(
+//                            remoteStreamMap.get(items[subscribeRemoteStreamChoice])));
+//            singleChoiceDialog.show();
+//        }
+//    };
+
+//    private View.OnClickListener unSubscribe = new View.OnClickListener() {
+//        @Override
+//        public void onClick(View v) {
+//            if (remoteForwardStream != null) {
+//                subscription.stop();
+//                remoteForwardStream.detach(remoteRenderer);
+//                runOnUiThread(() -> {
+//                    unSubscribeBtn.setVisibility(View.GONE);
+//                    subscribeBtn.setVisibility(View.VISIBLE);
+//                });
+//                subscribeRemoteStreamChoice = 0;
+//                subscribeVideoCodecChoice = 0;
+//            }
+//
+//        }
+//    };
+
+    private CheckBox.OnCheckedChangeListener onCheckedChangeListener=new CheckBox.OnCheckedChangeListener(){
+        public void onCheckedChanged(CompoundButton checkBox, boolean checked){
+            String name=checkBox.getText().toString();
+            int index=Integer.parseInt( name)-1;
+            if(checked==true){
+                subscribeRemoteStreamChoice = 0;
+                subscribeVideoCodecChoice = 0;
+                subscribeSimulcastRidChoice = 0;
+                final String[] items = (String[]) remoteStreamIdList.toArray(new String[0]);
+                AlertDialog.Builder singleChoiceDialog =
+                        new AlertDialog.Builder(MainActivity.this);
+                singleChoiceDialog.setTitle("Remote Stream List");
+                singleChoiceDialog.setSingleChoiceItems(items, 0,
+                        (dialog, which) -> subscribeRemoteStreamChoice = which);
+                singleChoiceDialog.setPositiveButton("ok",
+                        (dialog, which) -> chooseCodec(
+                                index,remoteStreamMap.get(items[subscribeRemoteStreamChoice])));
+                singleChoiceDialog.show();
+            }
+            else{
+                if (remoteForwardStreams[index] != null) {
+                    subscriptions[index].stop();
+                    remoteForwardStreams[index].detach(remoteRenderers.get(index));
+//                    runOnUiThread(() -> {
+//                        unSubscribeBtn.setVisibility(View.GONE);
+//                        subscribeBtn.setVisibility(View.VISIBLE);
+//                    });
+                    subscribeRemoteStreamChoice = 0;
+                    subscribeVideoCodecChoice = 0;
+                }
+            }
         }
     };
 
@@ -183,27 +235,12 @@ public class MainActivity extends AppCompatActivity
         }
     };
 
-    private View.OnClickListener unSubscribe = new View.OnClickListener() {
-        @Override
-        public void onClick(View v) {
-            if (remoteForwardStream != null) {
-                subscription.stop();
-                remoteForwardStream.detach(remoteRenderer);
-                runOnUiThread(() -> {
-                    unSubscribeBtn.setVisibility(View.GONE);
-                    subscribeBtn.setVisibility(View.VISIBLE);
-                });
-                subscribeRemoteStreamChoice = 0;
-                subscribeVideoCodecChoice = 0;
-            }
-
-        }
-    };
-
     private View.OnClickListener unpublish = new View.OnClickListener() {
         @Override
         public void onClick(View v) {
-            localRenderer.setVisibility(View.GONE);
+//            localRenderer.setVisibility(View.GONE);
+            localRenderer.clearImage();
+            localRenderer.invalidate();
             rightBtn.setText(R.string.publish);
             rightBtn.setOnClickListener(publish);
             videoFragment.clearStats(true);
@@ -228,19 +265,27 @@ public class MainActivity extends AppCompatActivity
             rightBtn.setEnabled(false);
             rightBtn.setTextColor(Color.DKGRAY);
             executor.execute(() -> {
-                boolean vga = settingsFragment == null || settingsFragment.resolutionVGA;
+                int w=640,h=480;
+                if(settingsFragment != null ){
+                    w=settingsFragment.capW;
+                    h=settingsFragment.capH;
+                }
                 boolean isCameraFront = settingsFragment == null || settingsFragment.cameraFront;
-                capturer = OwtVideoCapturer.create(vga ? 640 : 1280, vga ? 480 : 720, 30, true,
+                capturer = OwtVideoCapturer.create(w, h, 30, true,
                         isCameraFront);
+
                 localStream = new LocalStream(capturer,
                         new MediaConstraints.AudioTrackConstraints());
                 localStream.attach(localRenderer);
 
+                capturer.SetDownScaleEnalbe(false);//plus added
+                capturer.SetMinFramerate(20);//plus added
                 ActionCallback<Publication> callback = new ActionCallback<Publication>() {
                     @Override
                     public void onSuccess(final Publication result) {
                         runOnUiThread(() -> {
-                            localRenderer.setVisibility(View.VISIBLE);
+                            //取消本地悬浮窗口
+//                            localRenderer.setVisibility(View.VISIBLE);
 
                             rightBtn.setEnabled(true);
                             rightBtn.setTextColor(Color.WHITE);
@@ -250,22 +295,23 @@ public class MainActivity extends AppCompatActivity
 
                         publication = result;
 
-                        try {
-                            JSONArray mixBody = new JSONArray();
-                            JSONObject body = new JSONObject();
-                            body.put("op", "add");
-                            body.put("path", "/info/inViews");
-                            body.put("value", "common");
-                            mixBody.put(body);
-
-                            String serverUrl = loginFragment.getServerUrl();
-                            String uri = serverUrl
-                                    + "/rooms/" + conferenceInfo.id()
-                                    + "/streams/" + result.id();
-                            HttpUtils.request(uri, "PATCH", mixBody.toString(), true);
-                        } catch (JSONException e) {
-                            e.printStackTrace();
-                        }
+                        //aoqi 取消混流
+//                        try {
+//                            JSONArray mixBody = new JSONArray();
+//                            JSONObject body = new JSONObject();
+//                            body.put("op", "add");
+//                            body.put("path", "/info/inViews");
+//                            body.put("value", "common");
+//                            mixBody.put(body);
+//
+//                            String serverUrl = loginFragment.getServerUrl();
+//                            String uri = serverUrl
+//                                    + "/rooms/" + conferenceInfo.id()
+//                                    + "/streams/" + result.id();
+//                            HttpUtils.request(uri, "PATCH", mixBody.toString(), true);
+//                        } catch (JSONException e) {
+//                            e.printStackTrace();
+//                        }
                     }
 
                     @Override
@@ -281,7 +327,6 @@ public class MainActivity extends AppCompatActivity
 
                     }
                 };
-
                 conferenceClient.publish(localStream, setPublishOptions(), callback);
             });
         }
@@ -317,21 +362,25 @@ public class MainActivity extends AppCompatActivity
                     public void onSuccess(ConferenceInfo conferenceInfo) {
                         MainActivity.this.conferenceInfo = conferenceInfo;
                         for (RemoteStream remoteStream : conferenceInfo.getRemoteStreams()) {
-                            remoteStreamIdList.add(remoteStream.id());
-                            remoteStreamMap.put(remoteStream.id(), remoteStream);
-                            getParameterByRemoteStream(remoteStream);
-                            remoteStream.addObserver(new owt.base.RemoteStream.StreamObserver() {
-                                @Override
-                                public void onEnded() {
-                                    remoteStreamIdList.remove(remoteStream.id());
-                                    remoteStreamMap.remove(remoteStream.id());
-                                }
+//                            remoteStreamIdList.add(remoteStream.id());
+//                            remoteStreamMap.put(remoteStream.id(), remoteStream);
+//                            getParameterByRemoteStream(remoteStream);
+//                            remoteStream.addObserver(new owt.base.RemoteStream.StreamObserver() {
+//                                @Override
+//                                public void onEnded() {
+//                                    remoteStreamIdList.remove(remoteStream.id());
+//                                    remoteStreamMap.remove(remoteStream.id());
+//                                }
+//
+//                                @Override
+//                                public void onUpdated() {
+//
+//                                }
+//                            });
+                            //订阅sfu流
 
-                                @Override
-                                public void onUpdated() {
-
-                                }
-                            });
+                            if(!remoteStream.origin().equals("mixer"))
+                                onStreamAdded(remoteStream);
                         }
                         requestPermission();
                     }
@@ -390,12 +439,24 @@ public class MainActivity extends AppCompatActivity
         leftBtn.setOnClickListener(joinRoom);
         rightBtn = findViewById(R.id.multi_func_btn_right);
         rightBtn.setOnClickListener(settings);
-        subscribeBtn = findViewById(R.id.multi_func_btn_subscribe);
-        subscribeBtn.setOnClickListener(subscribe);
-        subscribeBtn.setVisibility(View.GONE);
-        unSubscribeBtn = findViewById(R.id.multi_func_btn_unsubscribe);
-        unSubscribeBtn.setOnClickListener(unSubscribe);
-        unSubscribeBtn.setVisibility(View.GONE);
+//        subscribeBtn = findViewById(R.id.multi_func_btn_subscribe);
+//        subscribeBtn.setOnClickListener(subscribe);
+//        subscribeBtn.setVisibility(View.GONE);
+//        unSubscribeBtn = findViewById(R.id.multi_func_btn_unsubscribe);
+//        unSubscribeBtn.setOnClickListener(unSubscribe);
+//        unSubscribeBtn.setVisibility(View.GONE);
+        CheckBox checkBox1=findViewById(R.id.multi_func_btn_subscribe1);
+        checkBox1.setOnCheckedChangeListener(onCheckedChangeListener);
+
+        CheckBox checkBox2=findViewById(R.id.multi_func_btn_subscribe2);
+        checkBox2.setOnCheckedChangeListener(onCheckedChangeListener);
+
+        CheckBox checkBox3=findViewById(R.id.multi_func_btn_subscribe3);
+        checkBox3.setOnCheckedChangeListener(onCheckedChangeListener);
+
+        CheckBox checkBox4=findViewById(R.id.multi_func_btn_subscribe4);
+        checkBox4.setOnCheckedChangeListener(onCheckedChangeListener);
+
         middleBtn = findViewById(R.id.multi_func_btn_middle);
         middleBtn.setOnClickListener(shareScreen);
         middleBtn.setVisibility(View.GONE);
@@ -414,8 +475,14 @@ public class MainActivity extends AppCompatActivity
         if (localStream != null) {
             localStream.detach(localRenderer);
         }
-        if (stream2Sub != null) {
-            stream2Sub.detach(remoteRenderer);
+//        if (stream2Sub != null) {
+//            stream2Sub.detach(remoteRenderer);
+//        }
+        if(remoteForwardStreams!=null) {
+            for (int i = 0; i < remoteForwardStreams.length; i++) {
+                if (remoteForwardStreams[i] != null)
+                    remoteForwardStreams[i].detach(remoteRenderers.get(i));
+            }
         }
 
         super.onPause();
@@ -427,8 +494,14 @@ public class MainActivity extends AppCompatActivity
         if (localStream != null) {
             localStream.attach(localRenderer);
         }
-        if (stream2Sub != null) {
-            stream2Sub.attach(remoteRenderer);
+//        if (stream2Sub != null) {
+//            stream2Sub.attach(remoteRenderer);
+//        }
+        if(remoteForwardStreams!=null){
+            for (int i = 0; i < remoteForwardStreams.length; i++) {
+                if(remoteForwardStreams[i]!=null)
+                    remoteForwardStreams[i].attach(remoteRenderers.get(i));
+            }
         }
     }
 
@@ -452,6 +525,9 @@ public class MainActivity extends AppCompatActivity
                     .initialize();
             contextHasInitialized = true;
         }
+
+        // NOTE: this _must_ happen while |factory| is alive!
+        Logging.enableLogToDebugOutput(Logging.Severity.LS_INFO);
 
         PeerConnection.IceServer iceServer = PeerConnection.IceServer.builder(
                 "turn:example.com?transport=tcp").setUsername("userName").setPassword(
@@ -518,7 +594,7 @@ public class MainActivity extends AppCompatActivity
             rightBtn.setText(R.string.publish);
             rightBtn.setOnClickListener(publish);
             fragmentContainer.setOnClickListener(screenControl);
-            subscribeBtn.setVisibility(View.VISIBLE);
+//            subscribeBtn.setVisibility(View.VISIBLE);
 
         });
 
@@ -573,31 +649,41 @@ public class MainActivity extends AppCompatActivity
 
     public PublishOptions setPublishOptions() {
         PublishOptions options = null;
-        VideoEncodingParameters h264 = new VideoEncodingParameters(H264);
-        VideoEncodingParameters vp8 = new VideoEncodingParameters(VP8);
+		//set the video max bitrate and min bitrate
+        int maxBitrateKbps = 4*1024;
+        int minBitrateKbps = 512;
+        VideoEncodingParameters h264 = new VideoEncodingParameters(new VideoCodecParameters(H264), maxBitrateKbps, minBitrateKbps);
+        VideoEncodingParameters vp8 = new VideoEncodingParameters(new VideoCodecParameters(VP8), maxBitrateKbps, minBitrateKbps);
         VideoEncodingParameters vp9 = new VideoEncodingParameters(VP9);
         VideoEncodingParameters h265 = new VideoEncodingParameters(H265);
+        //aoqi add
+        AudioEncodingParameters opus=new AudioEncodingParameters(new AudioCodecParameters(OPUS),96);
         if (settingsFragment != null && settingsFragment.VideoEncodingVP8) {
             options = PublishOptions.builder()
                     .addVideoParameter(vp8)
+                    .addAudioParameter(opus)
                     .build();
         } else if (settingsFragment != null && settingsFragment.VideoEncodingH264) {
             options = PublishOptions.builder()
                     .addVideoParameter(h264)
+                    .addAudioParameter(opus)
                     .build();
         } else if (settingsFragment != null && settingsFragment.VideoEncodingVP9) {
             options = PublishOptions.builder()
                     .addVideoParameter(vp9)
+                    .addAudioParameter(opus)
                     .build();
         } else if (settingsFragment != null && settingsFragment.VideoEncodingH265) {
             options = PublishOptions.builder()
                     .addVideoParameter(h265)
+                    .addAudioParameter(opus)
                     .build();
         } else {
             options = PublishOptions.builder()
                     .addVideoParameter(vp8)
                     .addVideoParameter(h264)
                     .addVideoParameter(vp9)
+                    .addAudioParameter(opus)
                     .build();
         }
         return options;
@@ -608,7 +694,7 @@ public class MainActivity extends AppCompatActivity
             publication.getStats(new ActionCallback<RTCStatsReport>() {
                 @Override
                 public void onSuccess(RTCStatsReport result) {
-                    videoFragment.updateStats(result, true);
+                    videoFragment.updateStats(result, -1);
                 }
 
                 @Override
@@ -621,7 +707,7 @@ public class MainActivity extends AppCompatActivity
             screenPublication.getStats(new ActionCallback<RTCStatsReport>() {
                 @Override
                 public void onSuccess(RTCStatsReport result) {
-                    videoFragment.updateStats(result, true);
+                    videoFragment.updateStats(result, -1);
                 }
 
                 @Override
@@ -630,18 +716,23 @@ public class MainActivity extends AppCompatActivity
                 }
             });
         }
-        if (subscription != null) {
-            subscription.getStats(new ActionCallback<RTCStatsReport>() {
-                @Override
-                public void onSuccess(RTCStatsReport result) {
-                    videoFragment.updateStats(result, false);
-                }
+        if(subscriptions!=null){
+            for (int i=0;i<subscriptions.length;++i){
+                if (subscriptions[i] != null) {
+                    int finalI = i;
+                    subscriptions[i].getStats(new ActionCallback<RTCStatsReport>() {
+                        @Override
+                        public void onSuccess(RTCStatsReport result) {
+                            videoFragment.updateStats(result, finalI);
+                        }
 
-                @Override
-                public void onFailure(OwtError error) {
+                        @Override
+                        public void onFailure(OwtError error) {
 
+                        }
+                    });
                 }
-            });
+            }
         }
     }
 
@@ -656,7 +747,7 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    public void chooseCodec(RemoteStream remoteStream) {
+    public void chooseCodec(int index, RemoteStream remoteStream) {
         List<String> videoCodecList = videoCodecMap.get(remoteStream.id());
         removeDuplicate(videoCodecList);
         final String[] items = videoCodecList.toArray(new String[0]);
@@ -669,16 +760,16 @@ public class MainActivity extends AppCompatActivity
                 (dialog, which) -> {
                     String chooseVideoCodec = items[subscribeVideoCodecChoice];
                     if (simulcastStreamMap.containsKey(remoteStream.id())) {
-                        chooseRid(remoteStream, chooseVideoCodec);
+                        chooseRid(index,remoteStream, chooseVideoCodec);
                     } else {
-                        subscribeForward(remoteStream, chooseVideoCodec, null);
+                        subscribeForward(index,remoteStream, chooseVideoCodec, null);
                     }
 
                 });
         singleChoiceDialog.show();
     }
 
-    public void chooseRid(RemoteStream remoteStream, String videoCodec) {
+    public void chooseRid(int index, RemoteStream remoteStream, String videoCodec) {
         List<String> ridList = simulcastStreamMap.get(remoteStream.id());
         removeDuplicate(ridList);
         final String[] items = (String[]) ridList.toArray(new String[0]);
@@ -688,11 +779,11 @@ public class MainActivity extends AppCompatActivity
         singleChoiceDialog.setSingleChoiceItems(items, 0,
                 (dialog, which) -> subscribeSimulcastRidChoice = which);
         singleChoiceDialog.setPositiveButton("ok",
-                (dialog, which) -> subscribeForward(remoteStream,videoCodec, items[subscribeSimulcastRidChoice]));
+                (dialog, which) -> subscribeForward(index,remoteStream,videoCodec, items[subscribeSimulcastRidChoice]));
         singleChoiceDialog.show();
     }
 
-    public void subscribeForward(RemoteStream remoteStream, String videoCodec, String rid) {
+    public void subscribeForward(int index, RemoteStream remoteStream, String videoCodec, String rid) {
         VideoSubscriptionConstraints.Builder videoOptionBuilder =
                 VideoSubscriptionConstraints.builder();
 
@@ -729,13 +820,13 @@ public class MainActivity extends AppCompatActivity
                 new ActionCallback<Subscription>() {
                     @Override
                     public void onSuccess(Subscription result) {
-                        MainActivity.this.subscription = result;
-                        MainActivity.this.remoteForwardStream = remoteStream;
-                        remoteStream.attach(remoteRenderer);
-                        runOnUiThread(() -> {
-                            subscribeBtn.setVisibility(View.GONE);
-                            unSubscribeBtn.setVisibility(View.VISIBLE);
-                        });
+                        MainActivity.this.subscriptions[index] = result;
+                        MainActivity.this.remoteForwardStreams[index] = remoteStream;
+                        remoteStream.attach(remoteRenderers.get(index));
+//                        runOnUiThread(() -> {
+//                            subscribeBtn.setVisibility(View.GONE);
+//                            unSubscribeBtn.setVisibility(View.VISIBLE);
+//                        });
 
                     }
 
@@ -748,21 +839,109 @@ public class MainActivity extends AppCompatActivity
     }
 
     @Override
-    public void onRenderer(SurfaceViewRenderer localRenderer, SurfaceViewRenderer remoteRenderer) {
+    public void onRenderer(SurfaceViewRenderer localRenderer, List<SurfaceViewRenderer> remoteRenderers) {
         this.localRenderer = localRenderer;
-        this.remoteRenderer = remoteRenderer;
+        this.remoteRenderers = remoteRenderers;
     }
+
+    public int getValidIndex(){
+        for(int i=0;i<remoteForwardStreams.length;++i){
+            if(remoteForwardStreams[i]==null){
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public int unsubscripStream(RemoteStream remoteStream){
+        for(int i=0;i<remoteForwardStreams.length;++i){
+            if(remoteForwardStreams[i]==remoteStream){
+                if(subscriptions[i]!=null)
+                {
+                    subscriptions[i].stop();
+                    subscriptions[i]=null;
+                }
+
+                remoteStream.detach(remoteRenderers.get(i));
+                remoteRenderers.get(i).clearImage();
+                int finalI = i;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        remoteRenderers.get(
+                                finalI).invalidate();
+                    }
+                });
+                remoteForwardStreams[i]=null;
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public void subscripStream(RemoteStream remoteStream){
+        int index=getValidIndex();
+        if(index<0)
+            return;
+
+        //自己的流不拉音频
+        boolean self=conferenceInfo.self().id.equals(remoteStream.origin());
+
+        VideoSubscriptionConstraints.Builder videoOptionBuilder =
+                VideoSubscriptionConstraints.builder();
+
+        VideoSubscriptionConstraints videoOption = videoOptionBuilder
+                .addCodec(new VideoCodecParameters(remoteStream.publicationSettings.videoPublicationSettings.get(0).codec.name))
+                .build();
+
+        AudioSubscriptionConstraints audioOption =
+                AudioSubscriptionConstraints.builder()
+                        .addCodec(new AudioCodecParameters(OPUS))
+                        .addCodec(new AudioCodecParameters(PCMU))
+                        .build();
+
+        SubscribeOptions options = SubscribeOptions.builder(!self, true)
+                .setAudioOption(audioOption)
+                .setVideoOption(videoOption)
+                .build();
+
+        MainActivity.this.remoteForwardStreams[index] = remoteStream;
+        conferenceClient.subscribe(remoteStream, options,
+                new ActionCallback<Subscription>() {
+                    @Override
+                    public void onSuccess(Subscription result) {
+                        MainActivity.this.subscriptions[index] = result;
+
+                        remoteStream.attach(remoteRenderers.get(index));
+                    }
+
+                    @Override
+                    public void onFailure(OwtError error) {
+                        Log.e(TAG, "Failed to subscribe "
+                                + error.errorMessage);
+                    }
+                });
+    }
+
 
     @Override
     public void onStreamAdded(RemoteStream remoteStream) {
+        //自己的不管
+        boolean self=conferenceInfo.self().id.equals(remoteStream.origin());
+        if(self)
+            return;
         remoteStreamIdList.add(remoteStream.id());
         remoteStreamMap.put(remoteStream.id(), remoteStream);
         getParameterByRemoteStream(remoteStream);
         remoteStream.addObserver(new owt.base.RemoteStream.StreamObserver() {
             @Override
             public void onEnded() {
+                int index= unsubscripStream(remoteStream);
                 remoteStreamIdList.remove(remoteStream.id());
                 remoteStreamMap.remove(remoteStream.id());
+                if(index>=0 && remoteStreamIdList.size()>=remoteForwardStreams.length){
+                    subscripStream(remoteStreamMap.get(remoteStreamIdList.get(remoteForwardStreams.length-1)));
+                }
             }
 
             @Override
@@ -770,6 +949,7 @@ public class MainActivity extends AppCompatActivity
                 getParameterByRemoteStream(remoteStream);
             }
         });
+        subscripStream(remoteStream);
     }
 
     @Override
@@ -794,8 +974,8 @@ public class MainActivity extends AppCompatActivity
             rightBtn.setTextColor(Color.WHITE);
             rightBtn.setText(R.string.settings);
             rightBtn.setOnClickListener(settings);
-            subscribeBtn.setVisibility(View.GONE);
-            unSubscribeBtn.setVisibility(View.GONE);
+//            subscribeBtn.setVisibility(View.GONE);
+//            unSubscribeBtn.setVisibility(View.GONE);
             fragmentContainer.setOnClickListener(null);
         });
 
@@ -816,8 +996,16 @@ public class MainActivity extends AppCompatActivity
         }
 
         publication = null;
-        subscription = null;
-        stream2Sub = null;
+//        subscription = null;
+        for (int i = 0; i < subscriptions.length; i++) {
+            if(subscriptions[i]!=null)
+                subscriptions[i]=null;
+        }
+        for (int i = 0; i < remoteForwardStreams.length; i++) {
+            if(remoteForwardStreams[i]!=null)
+                remoteForwardStreams[i]=null;
+        }
+//        stream2Sub = null;
 
         remoteStreamIdList.clear();
         remoteStreamMap.clear();
