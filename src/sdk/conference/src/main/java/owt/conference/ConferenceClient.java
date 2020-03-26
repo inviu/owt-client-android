@@ -892,7 +892,9 @@ public final class ConferenceClient implements SignalingChannel.SignalingChannel
                 if (pcChannel.publication != null) {
                     pcChannel.publication.onError(error);
                 } else {
-                    pcChannel.subscription.onError(error);
+                    //aoqi fix
+                    if(pcChannel.subscription!=null)
+                        pcChannel.subscription.onError(error);
                 }
             }
         }

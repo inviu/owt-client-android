@@ -919,6 +919,9 @@ public class MainActivity extends AppCompatActivity
                     public void onFailure(OwtError error) {
                         Log.e(TAG, "Failed to subscribe "
                                 + error.errorMessage);
+                        MainActivity.this.remoteForwardStreams[index]=null;
+                        //TODO 要等一段时间
+                        subscripStream(remoteStream);
                     }
                 });
     }
