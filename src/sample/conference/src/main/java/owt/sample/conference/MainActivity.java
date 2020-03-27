@@ -13,6 +13,7 @@ import android.media.AudioManager;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.Fragment;
 import android.support.v4.content.ContextCompat;
@@ -50,6 +51,7 @@ import owt.base.AudioCodecParameters;
 import owt.base.AudioEncodingParameters;
 import owt.base.ContextInitialization;
 import owt.base.LocalStream;
+import owt.base.MediaCodecs;
 import owt.base.MediaConstraints;
 import owt.base.OwtError;
 import owt.base.VideoCodecParameters;
@@ -84,6 +86,7 @@ public class MainActivity extends AppCompatActivity
         ActivityCompat.OnRequestPermissionsResultCallback,
         ConferenceClient.ConferenceClientObserver {
     public static final int kMaxFullRenderer= VideoFragment.kMaxStream;
+    private static final int kRetry=10;
     static final int STATS_INTERVAL_MS = 5000;
     private static final String TAG = "OWT_CONF";
     private static final int OWT_REQUEST_CODE = 100;
@@ -214,15 +217,17 @@ public class MainActivity extends AppCompatActivity
                 singleChoiceDialog.show();
             }
             else{
-                if (remoteForwardStreams[index] != null) {
-                    subscriptions[index].stop();
-                    remoteForwardStreams[index].detach(remoteRenderers.get(index));
+                synchronized (remoteForwardStreams) {
+                    if (remoteForwardStreams[index] != null) {
+                        subscriptions[index].stop();
+                        remoteForwardStreams[index].detach(remoteRenderers.get(index));
 //                    runOnUiThread(() -> {
 //                        unSubscribeBtn.setVisibility(View.GONE);
 //                        subscribeBtn.setVisibility(View.VISIBLE);
 //                    });
-                    subscribeRemoteStreamChoice = 0;
-                    subscribeVideoCodecChoice = 0;
+                        subscribeRemoteStreamChoice = 0;
+                        subscribeVideoCodecChoice = 0;
+                    }
                 }
             }
         }
@@ -479,10 +484,13 @@ public class MainActivity extends AppCompatActivity
 //            stream2Sub.detach(remoteRenderer);
 //        }
         if(remoteForwardStreams!=null) {
-            for (int i = 0; i < remoteForwardStreams.length; i++) {
-                if (remoteForwardStreams[i] != null)
-                    remoteForwardStreams[i].detach(remoteRenderers.get(i));
+            synchronized (remoteForwardStreams){
+                for (int i = 0; i < remoteForwardStreams.length; i++) {
+                    if (remoteForwardStreams[i] != null)
+                        remoteForwardStreams[i].detach(remoteRenderers.get(i));
+                }
             }
+
         }
 
         super.onPause();
@@ -498,9 +506,11 @@ public class MainActivity extends AppCompatActivity
 //            stream2Sub.attach(remoteRenderer);
 //        }
         if(remoteForwardStreams!=null){
-            for (int i = 0; i < remoteForwardStreams.length; i++) {
-                if(remoteForwardStreams[i]!=null)
-                    remoteForwardStreams[i].attach(remoteRenderers.get(i));
+            synchronized (remoteForwardStreams){
+                for (int i = 0; i < remoteForwardStreams.length; i++) {
+                    if(remoteForwardStreams[i]!=null)
+                        remoteForwardStreams[i].attach(remoteRenderers.get(i));
+                }
             }
         }
     }
@@ -820,8 +830,10 @@ public class MainActivity extends AppCompatActivity
                 new ActionCallback<Subscription>() {
                     @Override
                     public void onSuccess(Subscription result) {
+                        synchronized (remoteForwardStreams){
+                            MainActivity.this.remoteForwardStreams[index] = remoteStream;
+                        }
                         MainActivity.this.subscriptions[index] = result;
-                        MainActivity.this.remoteForwardStreams[index] = remoteStream;
                         remoteStream.attach(remoteRenderers.get(index));
 //                        runOnUiThread(() -> {
 //                            subscribeBtn.setVisibility(View.GONE);
@@ -845,41 +857,46 @@ public class MainActivity extends AppCompatActivity
     }
 
     public int getValidIndex(){
-        for(int i=0;i<remoteForwardStreams.length;++i){
-            if(remoteForwardStreams[i]==null){
-                return i;
+        synchronized (remoteForwardStreams){
+            for(int i=0;i<remoteForwardStreams.length;++i){
+                if(remoteForwardStreams[i]==null){
+                    return i;
+                }
             }
         }
         return -1;
     }
 
     public int unsubscripStream(RemoteStream remoteStream){
-        for(int i=0;i<remoteForwardStreams.length;++i){
-            if(remoteForwardStreams[i]==remoteStream){
-                if(subscriptions[i]!=null)
-                {
-                    subscriptions[i].stop();
-                    subscriptions[i]=null;
-                }
-
-                remoteStream.detach(remoteRenderers.get(i));
-                remoteRenderers.get(i).clearImage();
-                int finalI = i;
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        remoteRenderers.get(
-                                finalI).invalidate();
+        synchronized (remoteForwardStreams){
+            for(int i=0;i<remoteForwardStreams.length;++i){
+                if(remoteForwardStreams[i]==remoteStream){
+                    if(subscriptions[i]!=null)
+                    {
+                        subscriptions[i].stop();
+                        subscriptions[i]=null;
                     }
-                });
-                remoteForwardStreams[i]=null;
-                return i;
+
+                    remoteStream.detach(remoteRenderers.get(i));
+                    remoteRenderers.get(i).clearImage();
+                    int finalI = i;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            remoteRenderers.get(
+                                    finalI).invalidate();
+                        }
+                    });
+                    remoteForwardStreams[i]=null;
+                    return i;
+                }
             }
         }
+
         return -1;
     }
 
-    public void subscripStream(RemoteStream remoteStream){
+    public void subscripStream(RemoteStream remoteStream,final int retry){
         int index=getValidIndex();
         if(index<0)
             return;
@@ -890,8 +907,16 @@ public class MainActivity extends AppCompatActivity
         VideoSubscriptionConstraints.Builder videoOptionBuilder =
                 VideoSubscriptionConstraints.builder();
 
+        VideoCodecParameters videoCodecParameters;
+        MediaCodecs.VideoCodec codec=remoteStream.publicationSettings.videoPublicationSettings.get(0).codec.name;
+        if(codec.equals(H264)){
+            videoCodecParameters=new VideoCodecParameters(codec, MediaCodecs.H264Profile.BASELINE);
+        }
+        else{
+            videoCodecParameters=new VideoCodecParameters(codec);
+        }
         VideoSubscriptionConstraints videoOption = videoOptionBuilder
-                .addCodec(new VideoCodecParameters(remoteStream.publicationSettings.videoPublicationSettings.get(0).codec.name))
+                .addCodec(videoCodecParameters)
                 .build();
 
         AudioSubscriptionConstraints audioOption =
@@ -905,23 +930,41 @@ public class MainActivity extends AppCompatActivity
                 .setVideoOption(videoOption)
                 .build();
 
-        MainActivity.this.remoteForwardStreams[index] = remoteStream;
+        synchronized (remoteForwardStreams){
+            MainActivity.this.remoteForwardStreams[index] = remoteStream;
+        }
+
         conferenceClient.subscribe(remoteStream, options,
                 new ActionCallback<Subscription>() {
                     @Override
                     public void onSuccess(Subscription result) {
+                        synchronized (remoteForwardStreams) {
+                            remoteStream.attach(remoteRenderers.get(index));
+                        }
                         MainActivity.this.subscriptions[index] = result;
-
-                        remoteStream.attach(remoteRenderers.get(index));
                     }
 
                     @Override
                     public void onFailure(OwtError error) {
-                        Log.e(TAG, "Failed to subscribe "
-                                + error.errorMessage);
-                        MainActivity.this.remoteForwardStreams[index]=null;
-                        //TODO 要等一段时间
-                        subscripStream(remoteStream);
+                        synchronized (remoteForwardStreams) {
+                            MainActivity.this.remoteForwardStreams[index] = null;
+                        }
+                        if(retry>0){
+                            Log.e(TAG, "Retry to subscribe "
+                                    + error.errorMessage+" id:"+remoteStream.id());
+                            TimerTask task = new TimerTask() {
+                                @Override
+                                public void run() {
+                                    subscripStream(remoteStream,retry-1);
+                                }
+                            };
+                            Timer timer = new Timer();
+                            timer.schedule(task, 1000);
+                        }
+                        else{
+                            Log.e(TAG, "Failed to subscribe "
+                                    + error.errorMessage+" id:"+remoteStream.id());
+                        }
                     }
                 });
     }
@@ -943,7 +986,7 @@ public class MainActivity extends AppCompatActivity
                 remoteStreamIdList.remove(remoteStream.id());
                 remoteStreamMap.remove(remoteStream.id());
                 if(index>=0 && remoteStreamIdList.size()>=remoteForwardStreams.length){
-                    subscripStream(remoteStreamMap.get(remoteStreamIdList.get(remoteForwardStreams.length-1)));
+                    subscripStream(remoteStreamMap.get(remoteStreamIdList.get(remoteForwardStreams.length-1)),kRetry);
                 }
             }
 
@@ -952,7 +995,7 @@ public class MainActivity extends AppCompatActivity
                 getParameterByRemoteStream(remoteStream);
             }
         });
-        subscripStream(remoteStream);
+        subscripStream(remoteStream,kRetry);
     }
 
     @Override
@@ -1004,9 +1047,11 @@ public class MainActivity extends AppCompatActivity
             if(subscriptions[i]!=null)
                 subscriptions[i]=null;
         }
-        for (int i = 0; i < remoteForwardStreams.length; i++) {
-            if(remoteForwardStreams[i]!=null)
-                remoteForwardStreams[i]=null;
+        synchronized (remoteForwardStreams) {
+            for (int i = 0; i < remoteForwardStreams.length; i++) {
+                if (remoteForwardStreams[i] != null)
+                    remoteForwardStreams[i] = null;
+            }
         }
 //        stream2Sub = null;
 
